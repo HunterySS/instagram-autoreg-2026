@@ -1,153 +1,169 @@
-import random
+from ppadb.client import Client as AdbClient
 import time
-from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import random
+import os
 
-# ===================== НАСТРОЙКИ =====================
-DRIVER_PATH = r"E:\instreg\msedgedriver.exe"
+# ================== НАСТРОЙКИ ==================
+FOLDER = r"E:\bd"  # путь к твоей папке (r-строка, чтобы \ не экранировались)
 
-FILES = {
-    "email":    r"bd\mail.txt",
-    "birthdate": r"bd\date.txt",
-    "fullname":  r"bd\fullname.txt",
-    "password":  r"bd\password.txt",
-    "username":  r"bd\username.txt"
+DEVICE_SERIAL = "emulator-5554"  # из adb devices — замени, если другой
+
+# Координаты для 720×1280 (примерные — подгони под свой эмулятор!)
+COORDS = {
+    "sign_up": (360, 1000),  # "Зарегистрироваться" / Sign up
+    "email_phone_choice": (360, 800),  # Выбор "Email или телефон"
+    "next": (600, 1100),  # "Далее" (часто справа внизу)
+    "full_name_field": (360, 600),
+    "username_field": (360, 800),  # если запрашивает username
+    "password_field": (360, 1000),
+    "birthday_day": (200, 700),  # пример для дня рождения (клик + ввод)
+    "birthday_month": (360, 700),
+    "birthday_year": (520, 700),
 }
 
-OUTPUT_FILE = "created_accounts.txt"
 
-# ===================== ФУНКЦИИ =====================
-def load_list(filepath):
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    except Exception as e:
-        print(f"Ошибка чтения {filepath}: {e}")
-        return []
+# ================== ЧТЕНИЕ ТОЛЬКО ПЕРВОЙ СТРОКИ ИЗ КАЖДОГО ФАЙЛА ==================
+def read_first_line(filename):
+    path = os.path.join(FOLDER, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Файл не найден: {path}")
+    with open(path, 'r', encoding='utf-8') as f:
+        first_line = f.readline().strip()
+    if not first_line:
+        raise ValueError(f"Первая строка пустая в файле: {filename}")
+    return first_line
 
-def get_random_account():
-    data = {}
-    for key, path in FILES.items():
-        items = load_list(path)
-        if not items:
-            raise ValueError(f"Файл {path} пуст или не найден")
-        data[key] = random.choice(items)
-    return data
+try:
+    FULL_NAME   = read_first_line("fullname.txt")
+    EMAIL       = read_first_line("mail.txt")
+    PASSWORD    = read_first_line("password.txt")
+    USERNAME    = read_first_line("username.txt")
+    BIRTH_DATE  = read_first_line("date.txt")  # "27.12.2002"
 
-def save_account(acc):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {acc['username']} | {acc['email']} | {acc['password']} | {acc['fullname']} | {acc['birthdate']}\n"
-    with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-        f.write(line)
-    print(f"\nАккаунт сохранён:\n{line.strip()}")
+    day, month, year = [p.strip() for p in BIRTH_DATE.split('.')]
 
-# ===================== СОЗДАНИЕ АККАУНТА =====================
-def create_one_account():
-    print("Запуск создания одного аккаунта...\n")
+    print("Данные для регистрации (первая строка каждого файла):")
+    print(f"  Полное имя:   {FULL_NAME}")
+    print(f"  Email:        {EMAIL}")
+    print(f"  Username:     {USERNAME}")
+    print(f"  Пароль:       {PASSWORD}")
+    print(f"  Дата рождения: {BIRTH_DATE} → {day}.{month}.{year}")
 
-    acc = get_random_account()
-    print("Данные:")
-    print(f"  Email:     {acc['email']}")
-    print(f"  Username:  {acc['username']}")
-    print(f"  Password:  {acc['password']}")
-    print(f"  Fullname:  {acc['fullname']}")
-    print(f"  Birthdate: {acc['birthdate']}\n")
+except Exception as e:
+    print(f"Ошибка при чтении первой строки: {e}")
+    exit(1)
 
-    options = Options()
-    # options.add_argument("--headless=new")   # ← раскомментируй, когда всё заработает
-    options.add_argument("--window-size=1280,900")
-    options.add_argument("--disable-notifications")
-    options.add_argument("--lang=ru")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
 
-    driver = webdriver.Edge(service=Service(DRIVER_PATH), options=options)
-    wait = WebDriverWait(driver, 30)
+# ================== ФУНКЦИИ ADB ==================
+def connect():
+    client = AdbClient(host="127.0.0.1", port=5037)
+    device = client.device(DEVICE_SERIAL)
+    print(f"Подключено: {DEVICE_SERIAL}")
+    return device
 
-    try:
-        driver.get("https://www.instagram.com/accounts/emailsignup/")
-        print("Страница открыта. Жду форму...")
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
-        time.sleep(4)
 
-        # 1. Email — первый input[type="text"] с autocomplete="off"
-        email_field = driver.find_element(By.CSS_SELECTOR, 'input[type="text"][autocomplete="off"][inputmode="text"]')
-        email_field.clear()
-        email_field.send_keys(acc['email'])
-        print("Email введён")
-        time.sleep(2)
+def tap(device, x, y, delay=1.2):
+    device.shell(f"input tap {x} {y}")
+    time.sleep(delay + random.uniform(0.4, 1.8))
 
-        # 2. Fullname — второй input[type="text"] с autocomplete="off"
-        fullname_field = driver.find_elements(By.CSS_SELECTOR, 'input[type="text"][autocomplete="off"]')[1]
-        fullname_field.clear()
-        fullname_field.send_keys(acc['fullname'])
-        print("Имя и фамилия введены")
-        time.sleep(2)
 
-        # 3. Username — input с aria-label="Имя пользователя" и type="search"
-        username_field = driver.find_element(By.CSS_SELECTOR, 'input[aria-label="Имя пользователя"][type="search"]')
-        username_field.clear()
-        username_field.send_keys(acc['username'])
-        print("Username введён")
-        time.sleep(2)
+def input_text(device, text):
+    # Экранируем пробелы и спецсимволы
+    escaped = text.replace(" ", "%s").replace("&", "\&").replace("'", "\\'")
+    device.shell(f"input text '{escaped}'")
+    time.sleep(1.0 + random.uniform(0.5, 1.5))
 
-        # 4. Password — третий input[type="text"] с autocomplete="off"
-        password_field = driver.find_elements(By.CSS_SELECTOR, 'input[type="text"][autocomplete="off"]')[2]
-        password_field.clear()
-        password_field.send_keys(acc['password'])
-        print("Пароль введён")
-        time.sleep(2)
 
-        # 5. Дата рождения — клик по <span> с текстом
-        day, month_name, year = acc['birthdate'].split('.')
+# ================== ОСНОВНАЯ ЛОГИКА РЕГИСТРАЦИИ ==================
+def register_one_account():
+    device = connect()
 
-        # День
-        day_span = driver.find_element(By.XPATH, f"//span[text()='{int(day)}']")
-        day_span.click()
-        print("День выбран")
-        time.sleep(1)
+    print("Запускаем Instagram...")
+    device.shell("am start -n com.instagram.android/.activity.MainTabActivity")
+    time.sleep(5 + random.uniform(2, 5))   # первый экран грузится дольше
 
-        # Месяц
-        month_span = driver.find_element(By.XPATH, f"//span[text()='{month_name}']")
-        month_span.click()
-        print("Месяц выбран")
-        time.sleep(1)
+    # Шаг 1. Первый экран — большая синяя кнопка "Начать"
+    print("Клик по кнопке 'Начать' (Sign up)...")
+    # Координаты для 720×1280 — примерно центр синей кнопки
+    # Если не сработает — подгони (обычно y = 950–1150)
+    tap(device, 360, 1087, delay=2.0)
 
-        # Год
-        year_span = driver.find_element(By.XPATH, f"//span[text()='{year}']")
-        year_span.click()
-        print("Год выбран")
-        time.sleep(2)
+    time.sleep(5 + random.uniform(2, 4))
 
-        # 6. Кнопка "Отправить" — по тексту внутри span
-        submit_button = driver.find_element(By.XPATH, "//span[text()='Отправить']/ancestor::div[@role='none']")
-        submit_button.click()
-        print("Кнопка 'Отправить' нажата!")
-        time.sleep(8)
+    # Шаг 2. Экран выбора способа регистрации → клик "Email или телефон"
+    print("Выбор 'Email или телефон'...")
+    # Обычно эта кнопка находится чуть ниже центра
+    tap(device, 360, 590, delay=1.5)   # ← подгони под свой экран!
 
-        # Проверка на окно кода
-        if "код" in driver.page_source.lower() or "code" in driver.page_source.lower():
-            print("ОТКРЫЛОСЬ ОКНО ВВОДА КОДА ПОДТВЕРЖДЕНИЯ!")
-        else:
-            print("Окно кода не появилось — проверь вручную")
+    time.sleep(4 + random.uniform(1, 3))
 
-        save_account(acc)
+    # Шаг 3. Ввод email
+    print(f"Ввод email: {EMAIL}")
+    # Сначала кликаем в поле ввода (чтобы активировать клавиатуру)
+    tap(device, 360, 350, delay=1.0)   # примерно середина поля email
+    input_text(device, EMAIL)
+    time.sleep(1.5)
 
-    except Exception as e:
-        print("\nОшибка:", str(e))
-        driver.save_screenshot("error.png")
-        print("Скриншот сохранён как error.png")
+    # Кнопка "Далее" (обычно справа внизу или по центру внизу)
+    print("Нажимаем 'Далее' после email...")
+    tap(device, 360, 400, delay=2.0)  # ← это часто координаты "Next"
 
-    finally:
-        driver.quit()
-        print("\nГотово!\n")
+    time.sleep(5 + random.uniform(2, 4))
 
+    # Шаг 4. Полное имя
+    print(f"Ввод полного имени: {FULL_NAME}")
+    tap(device, 360, 500, delay=1.0)   # клик в поле имени
+    input_text(device, FULL_NAME)
+    time.sleep(1.5)
+    tap(device, 600, 1100, delay=2.0)  # Далее
+
+    time.sleep(4 + random.uniform(1, 3))
+
+    # Шаг 5. Дата рождения (Instagram почти всегда запрашивает)
+    print("Ввод даты рождения...")
+    # Поле День
+    tap(device, 200, 700, delay=1.0)
+    input_text(device, day)
+    time.sleep(1)
+
+    # Поле Месяц
+    tap(device, 360, 700, delay=1.0)
+    input_text(device, month)
+    time.sleep(1)
+
+    # Поле Год
+    tap(device, 520, 700, delay=1.0)
+    input_text(device, year)
+    time.sleep(1.5)
+
+    tap(device, 600, 1100, delay=2.0)  # Далее
+
+    time.sleep(5 + random.uniform(2, 4))
+
+    # Шаг 6. Username
+    print(f"Ввод username: {USERNAME}")
+    tap(device, 360, 600, delay=1.0)   # клик в поле username
+    input_text(device, USERNAME)
+    time.sleep(1.5)
+    tap(device, 600, 1100, delay=2.0)  # Далее
+
+    time.sleep(4 + random.uniform(1, 3))
+
+    # Шаг 7. Пароль
+    print(f"Ввод пароля: {PASSWORD}")
+    tap(device, 360, 700, delay=1.0)
+    input_text(device, PASSWORD)
+    time.sleep(1.5)
+    tap(device, 600, 1100, delay=2.0)  # Далее / Завершить
+
+    print("\nРегистрация дошла до этапа подтверждения.")
+    print("Теперь должен прийти код на email или запрос SMS.")
+    print("Скрипт завершил базовую часть. Дальше — подтверждение кода вручную или через API.")
+
+
+# ================== ЗАПУСК ==================
 if __name__ == "__main__":
-    create_one_account()
+    try:
+        register_one_account()
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
