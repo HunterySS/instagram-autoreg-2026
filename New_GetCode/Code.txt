@@ -1,0 +1,126 @@
+# email_parser.py
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+import time
+import os
+import pickle
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class EmailParser:
+    def __init__(self, profile_path=None):
+        if profile_path is None:
+            profile_path = r"C:\ChromeProfiles\MailRuAutomation"
+        
+        self.profile_path = profile_path
+        self.driver = None
+        
+    def setup_driver(self):
+        """Настройка Chrome драйвера"""
+        if not os.path.exists(self.profile_path):
+            os.makedirs(self.profile_path)
+            logger.info(f"Создана папка профиля: {self.profile_path}")
+        
+        options = Options()
+        options.add_argument(f"--user-data-dir={self.profile_path}")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--start-maximized")
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+        
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=options)
+        logger.info("Браузер запущен")
+        
+    def login_to_email(self, email: str, password: str):
+        """Вход в почту Mail.ru"""
+        try:
+            self.driver.get("https://e.mail.ru/inbox")
+            time.sleep(2)
+            
+            # Проверяем, не залогинены ли уже
+            if "inbox" in self.driver.current_url:
+                logger.info("Уже залогинены в почту")
+                return True
+            
+            # Вводим email
+            email_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "login"))
+            )
+            email_input.send_keys(email)
+            
+            # Нажимаем кнопку "Ввести пароль"
+            next_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Ввести пароль')]")
+            next_btn.click()
+            time.sleep(1)
+            
+            # Вводим пароль
+            password_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "password"))
+            )
+            password_input.send_keys(password)
+            
+            # Нажимаем кнопку входа
+            login_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Войти')]")
+            login_btn.click()
+            
+            time.sleep(3)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка входа в почту: {e}")
+            return False
+    
+    def get_instagram_code(self, timeout: int = 60) -> str:
+        """
+        Получает код подтверждения из письма Instagram
+        Возвращает 6-значный код или None
+        """
+        try:
+            # Ждем появления письма
+            letter = WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//a[.//span[contains(text(), 'is your Instagram code')]]")
+                )
+            )
+            
+            # Кликаем для открытия письма
+            letter.click()
+            time.sleep(2)
+            
+            # Получаем текст письма
+            letter_body = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "letter-body"))
+            )
+            letter_text = letter_body.text
+            
+            # Ищем 6-значный код в тексте
+            import re
+            match = re.search(r'\b(\d{6})\b', letter_text)
+            
+            if match:
+                code = match.group(1)
+                logger.info(f"Найден код подтверждения: {code}")
+                return code
+            else:
+                logger.warning("Код не найден в тексте письма")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Ошибка получения кода: {e}")
+            return None
+    
+    def close(self):
+        """Закрывает браузер"""
+        if self.driver:
+            self.driver.quit()
+            logger.info("Браузер закрыт")
