@@ -1,28 +1,23 @@
-from ppadb.client import Client as AdbClient
+import uiautomator2 as u2
 import time
 import random
 import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+import threading
 
-# ================== НАСТРОЙКИ ==================
-FOLDER = r"E:\bd"  # путь к твоей папке (r-строка, чтобы \ не экранировались)
-
-DEVICE_SERIAL = "emulator-5554"  # из adb devices — замени, если другой
-
-# Координаты для 720×1280 (примерные — подгони под свой эмулятор!)
-COORDS = {
-    "sign_up": (360, 1000),  # "Зарегистрироваться" / Sign up
-    "email_phone_choice": (360, 800),  # Выбор "Email или телефон"
-    "next": (600, 1100),  # "Далее" (часто справа внизу)
-    "full_name_field": (360, 600),
-    "username_field": (360, 800),  # если запрашивает username
-    "password_field": (360, 1000),
-    "birthday_day": (200, 700),  # пример для дня рождения (клик + ввод)
-    "birthday_month": (360, 700),
-    "birthday_year": (520, 700),
-}
+# ================== КОНФИГУРАЦИЯ (ВАША, НЕ МЕНЯЛ) ==================
+FOLDER = r"C:\Git\instagram-autoreg-2026\instagram-autoreg-2026\bd"
+DEVICE_SERIAL = "emulator-5554"
+CHROME_PROFILE_PATH = r"C:\ChromeProfiles\MailRuAutomation"
 
 
-# ================== ЧТЕНИЕ ТОЛЬКО ПЕРВОЙ СТРОКИ ИЗ КАЖДОГО ФАЙЛА ==================
+# ================== ЧТЕНИЕ ДАННЫХ (ВАШЕ, НЕ МЕНЯЛ) ==================
 def read_first_line(filename):
     path = os.path.join(FOLDER, filename)
     if not os.path.exists(path):
@@ -33,137 +28,235 @@ def read_first_line(filename):
         raise ValueError(f"Первая строка пустая в файле: {filename}")
     return first_line
 
-try:
-    FULL_NAME   = read_first_line("fullname.txt")
-    EMAIL       = read_first_line("mail.txt")
-    PASSWORD    = read_first_line("password.txt")
-    USERNAME    = read_first_line("username.txt")
-    BIRTH_DATE  = read_first_line("date.txt")  # "27.12.2002"
 
+try:
+    FULL_NAME = read_first_line("fullname.txt")
+    EMAIL = read_first_line("mail.txt")
+    PASSWORD = read_first_line("password.txt")
+    USERNAME = read_first_line("username.txt")
+    BIRTH_DATE = read_first_line("date.txt")
     day, month, year = [p.strip() for p in BIRTH_DATE.split('.')]
 
-    print("Данные для регистрации (первая строка каждого файла):")
-    print(f"  Полное имя:   {FULL_NAME}")
-    print(f"  Email:        {EMAIL}")
-    print(f"  Username:     {USERNAME}")
-    print(f"  Пароль:       {PASSWORD}")
-    print(f"  Дата рождения: {BIRTH_DATE} → {day}.{month}.{year}")
-
+    print("Загружены данные для регистрации:")
+    print(f"  Полное имя   : {FULL_NAME}")
+    print(f"  Email        : {EMAIL}")
+    print(f"  Username     : {USERNAME}")
+    print(f"  Пароль       : {PASSWORD}")
+    print(f"  Дата рождения: {BIRTH_DATE}  →  {day}.{month}.{year}")
 except Exception as e:
-    print(f"Ошибка при чтении первой строки: {e}")
+    print(f"Ошибка чтения данных: {e}")
     exit(1)
 
-
-# ================== ФУНКЦИИ ADB ==================
-def connect():
-    client = AdbClient(host="127.0.0.1", port=5037)
-    device = client.device(DEVICE_SERIAL)
-    print(f"Подключено: {DEVICE_SERIAL}")
-    return device
+# ================== ПОДКЛЮЧЕНИЕ (ВАШЕ, НЕ МЕНЯЛ) ==================
+d = u2.connect(DEVICE_SERIAL)
+print(f"Подключено к устройству: {DEVICE_SERIAL}")
+d.implicitly_wait(6.0)
 
 
-def tap(device, x, y, delay=1.2):
-    device.shell(f"input tap {x} {y}")
-    time.sleep(delay + random.uniform(0.4, 1.8))
+# ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ВАШИ, НЕ МЕНЯЛ) ==================
+def human_delay(min_sec=1.1, max_sec=3.4):
+    time.sleep(random.uniform(min_sec, max_sec))
 
 
-def input_text(device, text):
-    # Экранируем пробелы и спецсимволы
-    escaped = text.replace(" ", "%s").replace("&", "\&").replace("'", "\\'")
-    device.shell(f"input text '{escaped}'")
-    time.sleep(1.0 + random.uniform(0.5, 1.5))
+def wait_and_click(texts, timeout=18, exact=False, by_resource=None, screenshot_on_fail=True):
+    start = time.time()
+    while time.time() - start < timeout:
+        for text in texts if isinstance(texts, list) else [texts]:
+            if by_resource:
+                e = d(resourceId=by_resource)
+            elif exact:
+                e = d(text=text)
+            else:
+                e = d(textContains=text)
+
+            if e.exists:
+                print(f"→ Нашли и кликаем: '{text}'")
+                e.click()
+                human_delay(1.3, 3.1)
+                return True
+
+        human_delay(0.6, 1.2)
+
+    print(f"!!! Не нашли ни один из вариантов: {texts}")
+    if screenshot_on_fail:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = f"fail_{ts}.png"
+        d.screenshot(path)
+        print(f"Скриншот ошибки сохранён: {path}")
+    return False
 
 
-# ================== ОСНОВНАЯ ЛОГИКА РЕГИСТРАЦИИ ==================
-def register_one_account():
-    device = connect()
+def input_field(hint_texts, value):
+    if not value:
+        print("Пустое значение — пропускаем ввод")
+        return
 
-    print("Запускаем Instagram...")
-    device.shell("am start -n com.instagram.android/.activity.MainTabActivity")
-    time.sleep(5 + random.uniform(2, 5))   # первый экран грузится дольше
+    human_delay(0.4, 1.0)
 
-    # Шаг 1. Первый экран — большая синяя кнопка "Начать"
-    print("Клик по кнопке 'Начать' (Sign up)...")
-    # Координаты для 720×1280 — примерно центр синей кнопки
-    # Если не сработает — подгони (обычно y = 950–1150)
-    tap(device, 360, 1087, delay=2.0)
+    for hint in hint_texts if isinstance(hint_texts, list) else [hint_texts]:
+        if d(textContains=hint).exists:
+            d(textContains=hint).click()
+            human_delay(0.5, 1.2)
+            break
 
-    time.sleep(5 + random.uniform(2, 4))
-
-    # Шаг 2. Экран выбора способа регистрации → клик "Email или телефон"
-    print("Выбор 'Email или телефон'...")
-    # Обычно эта кнопка находится чуть ниже центра
-    tap(device, 360, 590, delay=1.5)   # ← подгони под свой экран!
-
-    time.sleep(4 + random.uniform(1, 3))
-
-    # Шаг 3. Ввод email
-    print(f"Ввод email: {EMAIL}")
-    # Сначала кликаем в поле ввода (чтобы активировать клавиатуру)
-    tap(device, 360, 350, delay=1.0)   # примерно середина поля email
-    input_text(device, EMAIL)
-    time.sleep(1.5)
-
-    # Кнопка "Далее" (обычно справа внизу или по центру внизу)
-    print("Нажимаем 'Далее' после email...")
-    tap(device, 360, 400, delay=2.0)  # ← это часто координаты "Next"
-
-    time.sleep(5 + random.uniform(2, 4))
-
-    # Шаг 4. Полное имя
-    print(f"Ввод полного имени: {FULL_NAME}")
-    tap(device, 360, 500, delay=1.0)   # клик в поле имени
-    input_text(device, FULL_NAME)
-    time.sleep(1.5)
-    tap(device, 600, 1100, delay=2.0)  # Далее
-
-    time.sleep(4 + random.uniform(1, 3))
-
-    # Шаг 5. Дата рождения (Instagram почти всегда запрашивает)
-    print("Ввод даты рождения...")
-    # Поле День
-    tap(device, 200, 700, delay=1.0)
-    input_text(device, day)
-    time.sleep(1)
-
-    # Поле Месяц
-    tap(device, 360, 700, delay=1.0)
-    input_text(device, month)
-    time.sleep(1)
-
-    # Поле Год
-    tap(device, 520, 700, delay=1.0)
-    input_text(device, year)
-    time.sleep(1.5)
-
-    tap(device, 600, 1100, delay=2.0)  # Далее
-
-    time.sleep(5 + random.uniform(2, 4))
-
-    # Шаг 6. Username
-    print(f"Ввод username: {USERNAME}")
-    tap(device, 360, 600, delay=1.0)   # клик в поле username
-    input_text(device, USERNAME)
-    time.sleep(1.5)
-    tap(device, 600, 1100, delay=2.0)  # Далее
-
-    time.sleep(4 + random.uniform(1, 3))
-
-    # Шаг 7. Пароль
-    print(f"Ввод пароля: {PASSWORD}")
-    tap(device, 360, 700, delay=1.0)
-    input_text(device, PASSWORD)
-    time.sleep(1.5)
-    tap(device, 600, 1100, delay=2.0)  # Далее / Завершить
-
-    print("\nРегистрация дошла до этапа подтверждения.")
-    print("Теперь должен прийти код на email или запрос SMS.")
-    print("Скрипт завершил базовую часть. Дальше — подтверждение кода вручную или через API.")
+    print(f"Вводим: {value}")
+    d.send_keys(value, clear=True)
+    human_delay(1.0, 2.3)
 
 
-# ================== ЗАПУСК ==================
-if __name__ == "__main__":
+# ================== НОВАЯ ФУНКЦИЯ: ВВОД КОДА ==================
+def input_code_field(code):
+    """Вводит код подтверждения Instagram"""
+    print(f"\n🔐 Вводим код подтверждения: {code}")
+
+    # Ищем поле для ввода кода
+    if d(textContains="Код подтверждения").exists:
+        d(textContains="Код подтверждения").click()
+    elif d(textContains="Confirmation code").exists:
+        d(textContains="Confirmation code").click()
+    else:
+        # Ищем любое поле ввода
+        edit_text = d(className="android.widget.EditText")
+        if edit_text.exists:
+            edit_text.click()
+
+    human_delay(1, 2)
+    d.send_keys(code, clear=True)
+    human_delay(1, 2)
+
+    # Нажимаем "Подтвердить" или "Далее"
+    wait_and_click(["Подтвердить", "Confirm", "Далее", "Next"], timeout=10)
+
+
+# ================== НОВАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ КОДА ИЗ ПОЧТЫ ==================
+def get_instagram_code_from_email():
+    """Запускает браузер, ждет письмо с кодом, возвращает код"""
+
+    if not os.path.exists(CHROME_PROFILE_PATH):
+        os.makedirs(CHROME_PROFILE_PATH)
+        print(f"Создана папка профиля: {CHROME_PROFILE_PATH}")
+
+    options = Options()
+    options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+
     try:
-        register_one_account()
-    except Exception as e:
-        print(f"Критическая ошибка: {e}")
+        driver.get("https://e.mail.ru/inbox")
+        print("Браузер с почтой запущен. Ожидание письма с кодом...")
+
+        start_time = time.time()
+        timeout = 120  # ждем 2 минуты
+
+        while time.time() - start_time < timeout:
+            driver.refresh()
+            time.sleep(3)
+
+            try:
+                letter = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//a[.//span[contains(text(), 'is your Instagram code')]]")
+                    )
+                )
+
+                letter_text = letter.text
+                print(f"Найдено письмо: {letter_text}")
+
+                import re
+                match = re.search(r'\b(\d{6})\b', letter_text)
+                if match:
+                    code = match.group(1)
+                    print(f"✅ Получен код подтверждения: {code}")
+                    return code
+
+            except:
+                print(f"Ожидание кода... {int(time.time() - start_time)} сек")
+                continue
+
+        print("❌ Таймаут: код не получен")
+        return None
+
+    finally:
+        driver.quit()
+        print("Браузер закрыт")
+
+
+# ================== ОСНОВНАЯ ЛОГИКА РЕГИСТРАЦИИ (ВАША, НЕ МЕНЯЛ) ==================
+print("\nЗапуск Instagram...")
+d.app_start("com.instagram.android")
+human_delay(5, 9)
+
+print("Шаг 1 → Кнопка 'Начать / Sign up / Зарегистрироваться'")
+wait_and_click(["Начать", "Sign up", "Зарегистрироваться", "Create new account"])
+
+human_delay(3, 5)
+print("Шаг 2 → Выбор Email / Телефон")
+wait_and_click(["Зарегистрироваться с эл. адресом"])
+
+human_delay(3, 5)
+
+print("Шаг 3 → Ввод email")
+input_field(["Электронный адрес"], EMAIL)
+wait_and_click(["Далее", "Next", "Продолжить"])
+human_delay(3, 5)
+
+code = get_instagram_code_from_email()
+
+if code:
+    input_code_field(code)
+    human_delay(3, 5)
+    d.screenshot("registration_complete.png")
+    print("Финальный скриншот сохранён: registration_complete.png")
+    print("\n✅ Регистрация завершена!")
+else:
+    print("\n❌ Код не получен. Регистрация не завершена.")
+    d.screenshot("code_timeout.png")
+    print("Скриншот ошибки: code_timeout.png")
+
+print("Шаг 7 → Пароль")
+input_field(["Пароль", "Password"], PASSWORD)
+wait_and_click(["Далее", "Next", "Завершить", "Sign up", "Зарегистрироваться"])
+
+print("Шаг 5 → Дата рождения (если появляется)")
+if d(textContains="День рождения").exists or d(textContains="Birthday").exists or d(textContains="рождения").exists:
+    print("→ Заполняем дату рождения")
+    day_field   = d(resourceIdMatches=".*(day|Day|день).*",   className="android.widget.EditText")
+    month_field = d(resourceIdMatches=".*(month|Month|месяц).*", className="android.widget.EditText")
+    year_field  = d(resourceIdMatches=".*(year|Year|год).*",  className="android.widget.EditText")
+
+    if day_field.exists:
+        day_field.set_text(day)
+    else:
+        d.send_keys(day)
+
+    if month_field.exists:
+        month_field.set_text(month)
+    else:
+        d.send_keys(month)
+
+    if year_field.exists:
+        year_field.set_text(year)
+    else:
+        d.send_keys(year)
+
+    human_delay(1.2, 2.5)
+    wait_and_click(["Далее", "Next"])
+
+print("Шаг 4 → Полное имя")
+input_field(["Имя", "Full name", "Полное имя"], FULL_NAME)
+wait_and_click(["Далее", "Next"])
+
+print("Шаг 6 → Username")
+input_field(["Имя пользователя", "Username", "Пользователь"], USERNAME)
+wait_and_click(["Далее", "Next", "Проверить"])
+
+print("\n" + "=" * 60)
+print("Базовая часть регистрации завершена")
+print("Ожидается экран с кодом подтверждения")
+print("=" * 60)

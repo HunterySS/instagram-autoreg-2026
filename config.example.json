@@ -1,0 +1,22 @@
+﻿{
+  "adb_host": "127.0.0.1",
+  "adb_port": 5037,
+  "device_serial": "emulator-5554",
+  "data_dir": "./bd",
+  "wait_multiplier": 1.0,
+  "coords": {
+    "start_signup": [360, 1087],
+    "choose_email": [360, 590],
+    "email_field": [360, 350],
+    "email_next": [360, 400],
+    "fullname_field": [360, 500],
+    "birthday_day": [200, 700],
+    "birthday_month": [360, 700],
+    "birthday_year": [520, 700],
+    "username_field": [360, 600],
+    "password_field": [360, 700],
+    "next_common": [600, 1100],
+    "code_field": [360, 560],
+    "code_confirm": [600, 1100]
+  }
+}
